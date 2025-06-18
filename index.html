@@ -1,0 +1,548 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="ro">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Plan Electric</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.2/p5.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.10/pdfmake.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.10/vfs_fonts.js"></script>
+    <style>
+        body { margin: 0; font-family: Arial, sans-serif; }
+        #toolbar { background: #f0f0f0; padding: 10px; }
+        button { margin: 5px; padding: 8px 12px; cursor: pointer; }
+        #deviz { margin: 20px; }
+        input, select { margin: 5px; padding: 5px; }
+        #canvas-container { border: 1px solid #000; display: inline-block; }
+        .labor-input { width: 60px; }
+    </style>
+</head>
+<body>
+    <div id="toolbar">
+        <button onclick="mode = 'drawWall'">Desenează Perete</button>
+        <button onclick="mode = 'drawDoor'">Desenează Ușă</button>
+        <button onclick="mode = 'drawWindow'">Desenează Geam</button>
+        <button onclick="mode = 'addCamera'">Adaugă Cameră Web</button>
+        <button onclick="mode = 'addLight'">Adaugă Corp de Iluminat</button>
+        <button onclick="mode = 'addPIR'">Adaugă PIR</button>
+        <button onclick="mode = 'addOutlet'">Adaugă Priză</button>
+        <button onclick="mode = 'addNetworkOutlet'">Adaugă Priză de Rețea</button>
+        <button onclick="mode = 'addSwitch'">Adaugă Întrerupător</button>
+        <button onclick="undo()">Undo</button>
+        <button onclick="generateQuote()">Generează Deviz</button>
+        <button onclick="exportToPDF()">Exportă Deviz în PDF</button>
+        <br>
+        <label>Nume Client:</label>
+        <input type="text" id="clientName" placeholder="Introdu nume client">
+        <label>Încarcă Plan:</label>
+        <input type="file" id="planImage" accept="image/*">
+        <br>
+        <label>Tip Priză:</label>
+        <select id="outletType">
+            <option value="simpla">Priză Simpla</option>
+            <option value="dubla">Priză Dubla</option>
+            <option value="tripla">Priză Tripla</option>
+        </select>
+        <label>Tip Întrerupător:</label>
+        <select id="switchType">
+            <option value="simplu">Întrerupător Simplu</option>
+            <option value="dublu">Întrerupător Dublu</option>
+            <option value="capScara">Întrerupător Cap Scara</option>
+        </select>
+        <br>
+        <label>Manoperă Priză Simplă (RON):</label>
+        <input type="number" id="laborOutletSimpla" value="30" class="labor-input">
+        <label>Manoperă Priză Dublă (RON):</label>
+        <input type="number" id="laborOutletDubla" value="40" class="labor-input">
+        <label>Manoperă Priză Triplă (RON):</label>
+        <input type="number" id="laborOutletTripla" value="50" class="labor-input">
+        <br>
+        <label>Manoperă Priză Rețea (RON):</label>
+        <input type="number" id="laborNetworkOutlet" value="35" class="labor-input">
+        <label>Manoperă Întrerupător Simplu (RON):</label>
+        <input type="number" id="laborSwitchSimplu" value="25" class="labor-input">
+        <label>Manoperă Întrerupător Dublu (RON):</label>
+        <input type="number" id="laborSwitchDublu" value="35" class="labor-input">
+        <br>
+        <label>Manoperă Întrerupător Cap Scara (RON):</label>
+        <input type="number" id="laborSwitchCapScara" value="45" class="labor-input">
+        <label>Manoperă Corp Iluminat (RON):</label>
+        <input type="number" id="laborLight" value="50" class="labor-input">
+        <label>Manoperă PIR (RON):</label>
+        <input type="number" id="laborPIR" value="60" class="labor-input">
+        <label>Manoperă Cameră Web (RON):</label>
+        <input type="number" id="laborCamera" value="70" class="labor-input">
+    </div>
+    <div id="canvas-container"></div>
+    <div id="deviz"></div>
+
+    <script>
+        let walls = [];
+        let doors = [];
+        let windows = [];
+        let outlets = [];
+        let networkOutlets = [];
+        let switches = [];
+        let lights = [];
+        let pirs = [];
+        let cameras = [];
+        let mode = 'drawWall';
+        let startPoint = null;
+        let history = [];
+        let clientName = '';
+        let backgroundImg = null;
+
+        function preload() {
+            let input = document.getElementById('planImage');
+            input.addEventListener('change', (e) => {
+                let file = e.target.files[0];
+                if (file) {
+                    let img = loadImage(URL.createObjectURL(file));
+                    backgroundImg = img;
+                }
+            });
+        }
+
+        function setup() {
+            let canvas = createCanvas(800, 600);
+            canvas.parent('canvas-container');
+            background(255);
+            document.getElementById('clientName').addEventListener('input', (e) => {
+                clientName = e.target.value;
+            });
+        }
+
+        function draw() {
+            background(255);
+            if (backgroundImg) {
+                image(backgroundImg, 0, 0, width, height);
+            }
+
+            stroke(0);
+            strokeWeight(2);
+            for (let wall of walls) {
+                line(wall.startX, wall.startY, wall.endX, wall.endY);
+            }
+
+            stroke(0, 0, 255);
+            strokeWeight(2);
+            for (let door of doors) {
+                line(door.startX, door.startY, door.endX, door.endY);
+                let angle = atan2(door.endY - door.startY, door.endX - door.startX);
+                let midX = (door.startX + door.endX) / 2;
+                let midY = (door.startY + door.endY) / 2;
+                noFill();
+                arc(midX, midY, 20, 20, angle, angle + PI / 2);
+            }
+
+            stroke(0, 128, 0);
+            strokeWeight(1);
+            for (let window of windows) {
+                line(window.startX, window.startY, window.endX, window.endY);
+                let offsetX = (window.endY - window.startY) / 10;
+                let offsetY = (window.startX - window.endX) / 10;
+                line(window.startX + offsetX, window.startY + offsetY, window.endX + offsetX, window.endY + offsetY);
+            }
+
+            fill(255, 0, 0);
+            noStroke();
+            for (let outlet of outlets) {
+                ellipse(outlet.x, outlet.y, 10, 10);
+                text(outlet.type, outlet.x + 10, outlet.y);
+            }
+
+            fill(0, 255, 255);
+            for (let networkOutlet of networkOutlets) {
+                ellipse(networkOutlet.x, networkOutlet.y, 10, 10);
+                line(networkOutlet.x - 5, networkOutlet.y, networkOutlet.x + 5, networkOutlet.y);
+                line(networkOutlet.x, networkOutlet.y - 5, networkOutlet.x, networkOutlet.y + 5);
+                text('Priză Rețea', networkOutlet.x + 10, networkOutlet.y);
+            }
+
+            fill(0, 0, 255);
+            for (let sw of switches) {
+                rect(sw.x - 5, sw.y - 5, 10, 10);
+                text(sw.type, sw.x + 10, sw.y);
+            }
+
+            fill(0, 255, 0);
+            for (let light of lights) {
+                ellipse(light.x, light.y, 10, 10);
+                text('Corp Iluminat', light.x + 10, light.y);
+            }
+
+            fill(255, 165, 0);
+            for (let pir of pirs) {
+                triangle(pir.x - 5, pir.y + 5, pir.x + 5, pir.y + 5, pir.x, pir.y - 5);
+                text('PIR', pir.x + 10, pir.y);
+            }
+
+            fill(128, 0, 128);
+            for (let camera of cameras) {
+                rect(camera.x - 5, camera.y - 5, 10, 10);
+                text('Cameră Web', camera.x + 10, camera.y);
+            }
+
+            if (mode === 'drawWall' && startPoint) {
+                stroke(0);
+                strokeWeight(2);
+                line(startPoint.x, startPoint.y, mouseX, mouseY);
+            } else if (mode === 'drawDoor' && startPoint) {
+                stroke(0, 0, 255);
+                strokeWeight(2);
+                line(startPoint.x, startPoint.y, mouseX, mouseY);
+            } else if (mode === 'drawWindow' && startPoint) {
+                stroke(0, 128, 0);
+                strokeWeight(1);
+                line(startPoint.x, startPoint.y, mouseX, mouseY);
+            }
+        }
+
+        function mousePressed() {
+            if (mouseX >= 0 && mouseX <= width && mouseY >= 0 && mouseY <= height) {
+                if (mode === 'drawWall') {
+                    if (!startPoint) {
+                        startPoint = { x: mouseX, y: mouseY };
+                    } else {
+                        walls.push({ startX: startPoint.x, startY: startPoint.y, endX: mouseX, endY: mouseY });
+                        history.push({ type: 'wall', data: walls[walls.length - 1] });
+                        startPoint = null;
+                    }
+                } else if (mode === 'drawDoor') {
+                    if (!startPoint) {
+                        startPoint = { x: mouseX, y: mouseY };
+                    } else {
+                        doors.push({ startX: startPoint.x, startY: startPoint.y, endX: mouseX, endY: mouseY });
+                        history.push({ type: 'door', data: doors[doors.length - 1] });
+                        startPoint = null;
+                    }
+                } else if (mode === 'drawWindow') {
+                    if (!startPoint) {
+                        startPoint = { x: mouseX, y: mouseY };
+                    } else {
+                        windows.push({ startX: startPoint.x, startY: startPoint.y, endX: mouseX, endY: mouseY });
+                        history.push({ type: 'window', data: windows[windows.length - 1] });
+                        startPoint = null;
+                    }
+                } else if (mode === 'addOutlet') {
+                    let type = document.getElementById('outletType').value;
+                    outlets.push({ x: mouseX, y: mouseY, type: type });
+                    history.push({ type: 'outlet', data: outlets[outlets.length - 1] });
+                } else if (mode === 'addNetworkOutlet') {
+                    networkOutlets.push({ x: mouseX, y: mouseY });
+                    history.push({ type: 'networkOutlet', data: networkOutlets[networkOutlets.length - 1] });
+                } else if (mode === 'addSwitch') {
+                    let type = document.getElementById('switchType').value;
+                    switches.push({ x: mouseX, y: mouseY, type: type });
+                    history.push({ type: 'switch', data: switches[switches.length - 1] });
+                } else if (mode === 'addLight') {
+                    lights.push({ x: mouseX, y: mouseY });
+                    history.push({ type: 'light', data: lights[lights.length - 1] });
+                } else if (mode === 'addPIR') {
+                    pirs.push({ x: mouseX, y: mouseY });
+                    history.push({ type: 'pir', data: pirs[pirs.length - 1] });
+                } else if (mode === 'addCamera') {
+                    cameras.push({ x: mouseX, y: mouseY });
+                    history.push({ type: 'camera', data: cameras[cameras.length - 1] });
+                }
+            }
+        }
+
+        function undo() {
+            if (history.length > 0) {
+                let lastAction = history.pop();
+                console.log('Undoing action:', lastAction); // Pentru depanare
+                if (lastAction.type === 'wall' && walls.length > 0) {
+                    walls.pop();
+                } else if (lastAction.type === 'door' && doors.length > 0) {
+                    doors.pop();
+                } else if (lastAction.type === 'window' && windows.length > 0) {
+                    windows.pop();
+                } else if (lastAction.type === 'outlet' && outlets.length > 0) {
+                    outlets.pop();
+                } else if (lastAction.type === 'networkOutlet' && networkOutlets.length > 0) {
+                    networkOutlets.pop();
+                } else if (lastAction.type === 'switch' && switches.length > 0) {
+                    switches.pop();
+                } else if (lastAction.type === 'light' && lights.length > 0) {
+                    lights.pop();
+                } else if (lastAction.type === 'pir' && pirs.length > 0) {
+                    pirs.pop();
+                } else if (lastAction.type === 'camera' && cameras.length > 0) {
+                    cameras.pop();
+                }
+                redraw(); // Forțează redesenarea canvas-ului
+            } else {
+                console.log('No actions to undo'); // Pentru depanare
+            }
+        }
+
+        function generateQuote() {
+            let total = 0;
+            let devizHTML = `<h2>Deviz Electric</h2><p><strong>Client:</strong> ${clientName || 'Nespecificat'}</p><table border="1"><tr><th>Descriere</th><th>Cantitate</th><th>Pret Unitate (RON)</th><th>Total (RON)</th></tr>`;
+
+            // Prețuri manoperă din input-uri
+            let laborOutletSimpla = parseFloat(document.getElementById('laborOutletSimpla').value) || 30;
+            let laborOutletDubla = parseFloat(document.getElementById('laborOutletDubla').value) || 40;
+            let laborOutletTripla = parseFloat(document.getElementById('laborOutletTripla').value) || 50;
+            let laborNetworkOutlet = parseFloat(document.getElementById('laborNetworkOutlet').value) || 35;
+            let laborSwitchSimplu = parseFloat(document.getElementById('laborSwitchSimplu').value) || 25;
+            let laborSwitchDublu = parseFloat(document.getElementById('laborSwitchDublu').value) || 35;
+            let laborSwitchCapScara = parseFloat(document.getElementById('laborSwitchCapScara').value) || 45;
+            let laborLight = parseFloat(document.getElementById('laborLight').value) || 50;
+            let laborPIR = parseFloat(document.getElementById('laborPIR').value) || 60;
+            let laborCamera = parseFloat(document.getElementById('laborCamera').value) || 70;
+
+            // Prize electrice
+            let outletCounts = { simpla: 0, dubla: 0, tripla: 0 };
+            for (let outlet of outlets) {
+                outletCounts[outlet.type]++;
+            }
+            if (outletCounts.simpla > 0) {
+                let price = 50;
+                devizHTML += `<tr><td>Priză Simplă</td><td>${outletCounts.simpla}</td><td>${price}</td><td>${outletCounts.simpla * price}</td></tr>`;
+                devizHTML += `<tr><td>Manoperă Priză Simplă</td><td>${outletCounts.simpla}</td><td>${laborOutletSimpla}</td><td>${outletCounts.simpla * laborOutletSimpla}</td></tr>`;
+                total += outletCounts.simpla * (price + laborOutletSimpla);
+            }
+            if (outletCounts.dubla > 0) {
+                let price = 70;
+                devizHTML += `<tr><td>Priză Dublă</td><td>${outletCounts.dubla}</td><td>${price}</td><td>${outletCounts.dubla * price}</td></tr>`;
+                devizHTML += `<tr><td>Manoperă Priză Dublă</td><td>${outletCounts.dubla}</td><td>${laborOutletDubla}</td><td>${outletCounts.dubla * laborOutletDubla}</td></tr>`;
+                total += outletCounts.dubla * (price + laborOutletDubla);
+            }
+            if (outletCounts.tripla > 0) {
+                let price = 90;
+                devizHTML += `<tr><td>Priză Triplă</td><td>${outletCounts.tripla}</td><td>${price}</td><td>${outletCounts.tripla * price}</td></tr>`;
+                devizHTML += `<tr><td>Manoperă Priză Triplă</td><td>${outletCounts.tripla}</td><td>${laborOutletTripla}</td><td>${outletCounts.tripla * laborOutletTripla}</td></tr>`;
+                total += outletCounts.tripla * (price + laborOutletTripla);
+            }
+
+            // Prize de rețea
+            if (networkOutlets.length > 0) {
+                let price = 60;
+                devizHTML += `<tr><td>Priză de Rețea</td><td>${networkOutlets.length}</td><td>${price}</td><td>${networkOutlets.length * price}</td></tr>`;
+                devizHTML += `<tr><td>Manoperă Priză de Rețea</td><td>${networkOutlets.length}</td><td>${laborNetworkOutlet}</td><td>${networkOutlets.length * laborNetworkOutlet}</td></tr>`;
+                total += networkOutlets.length * (price + laborNetworkOutlet);
+            }
+
+            // Întrerupătoare
+            let switchCounts = { simplu: 0, dublu: 0, capScara: 0 };
+            for (let sw of switches) {
+                switchCounts[sw.type]++;
+            }
+            if (switchCounts.simplu > 0) {
+                let price = 40;
+                devizHTML += `<tr><td>Întrerupător Simplu</td><td>${switchCounts.simplu}</td><td>${price}</td><td>${switchCounts.simplu * price}</td></tr>`;
+                devizHTML += `<tr><td>Manoperă Întrerupător Simplu</td><td>${switchCounts.simplu}</td><td>${laborSwitchSimplu}</td><td>${switchCounts.simplu * laborSwitchSimplu}</td></tr>`;
+                total += switchCounts.simplu * (price + laborSwitchSimplu);
+            }
+            if (switchCounts.dublu > 0) {
+                let price = 60;
+                devizHTML += `<tr><td>Întrerupător Dublu</td><td>${switchCounts.dublu}</td><td>${price}</td><td>${switchCounts.dublu * price}</td></tr>`;
+                devizHTML += `<tr><td>Manoperă Întrerupător Dublu</td><td>${switchCounts.dublu}</td><td>${laborSwitchDublu}</td><td>${switchCounts.dublu * laborSwitchDublu}</td></tr>`;
+                total += switchCounts.dublu * (price + laborSwitchDublu);
+            }
+            if (switchCounts.capScara > 0) {
+                let price = 80;
+                devizHTML += `<tr><td>Întrerupător Cap Scara</td><td>${switchCounts.capScara}</td><td>${price}</td><td>${switchCounts.capScara * price}</td></tr>`;
+                devizHTML += `<tr><td>Manoperă Întrerupător Cap Scara</td><td>${switchCounts.capScara}</td><td>${laborSwitchCapScara}</td><td>${switchCounts.capScara * laborSwitchCapScara}</td></tr>`;
+                total += switchCounts.capScara * (price + laborSwitchCapScara);
+            }
+
+            // Corpuri de iluminat
+            if (lights.length > 0) {
+                let price = 100;
+                devizHTML += `<tr><td>Corp de Iluminat</td><td>${lights.length}</td><td>${price}</td><td>${lights.length * price}</td></tr>`;
+                devizHTML += `<tr><td>Manoperă Corp de Iluminat</td><td>${lights.length}</td><td>${laborLight}</td><td>${lights.length * laborLight}</td></tr>`;
+                total += lights.length * (price + laborLight);
+            }
+
+            // PIR
+            if (pirs.length > 0) {
+                let price = 120;
+                devizHTML += `<tr><td>Senzor PIR</td><td>${pirs.length}</td><td>${price}</td><td>${pirs.length * price}</td></tr>`;
+                devizHTML += `<tr><td>Manoperă Senzor PIR</td><td>${pirs.length}</td><td>${laborPIR}</td><td>${pirs.length * laborPIR}</td></tr>`;
+                total += pirs.length * (price + laborPIR);
+            }
+
+            // Camere web
+            if (cameras.length > 0) {
+                let price = 150;
+                devizHTML += `<tr><td>Cameră Web</td><td>${cameras.length}</td><td>${price}</td><td>${cameras.length * price}</td></tr>`;
+                devizHTML += `<tr><td>Manoperă Cameră Web</td><td>${cameras.length}</td><td>${laborCamera}</td><td>${cameras.length * laborCamera}</td></tr>`;
+                total += cameras.length * (price + laborCamera);
+            }
+
+            devizHTML += `</table><p><strong>Total: ${total} RON</strong></p>`;
+            document.getElementById('deviz').innerHTML = devizHTML;
+        }
+
+        function exportToPDF() {
+            const canvas = document.querySelector('canvas');
+            const canvasImage = canvas.toDataURL('image/png');
+
+            const docDefinition = {
+                content: [
+                    { text: 'Deviz Electric', style: 'header' },
+                    { text: `Client: ${clientName || 'Nespecificat'}`, style: 'subheader' },
+                    {
+                        table: {
+                            headerRows: 1,
+                            widths: ['*', 'auto', 'auto', 'auto'],
+                            body: [
+                                ['Descriere', 'Cantitate', 'Preț Unitate (RON)', 'Total (RON)'],
+                                ...getTableRows()
+                            ]
+                        }
+                    },
+                    { text: `Total: ${calculateTotal()} RON`, style: 'total' },
+                    { text: 'Plan Electric:', style: 'subheader', margin: [0, 20, 0, 10] },
+                    { image: canvasImage, width: 500, margin: [0, 0, 0, 10] }
+                ],
+                styles: {
+                    header: { fontSize: 18, bold: true, margin: [0, 0, 0, 10] },
+                    subheader: { fontSize: 14, margin: [0, 0, 0, 10] },
+                    total: { fontSize: 14, bold: true, margin: [0, 10, 0, 0] }
+                }
+            };
+
+            pdfMake.createPdf(docDefinition).download('deviz_electric.pdf');
+        }
+
+        function getTableRows() {
+            let rows = [];
+            let laborOutletSimpla = parseFloat(document.getElementById('laborOutletSimpla').value) || 30;
+            let laborOutletDubla = parseFloat(document.getElementById('laborOutletDubla').value) || 40;
+            let laborOutletTripla = parseFloat(document.getElementById('laborOutletTripla').value) || 50;
+            let laborNetworkOutlet = parseFloat(document.getElementById('laborNetworkOutlet').value) || 35;
+            let laborSwitchSimplu = parseFloat(document.getElementById('laborSwitchSimplu').value) || 25;
+            let laborSwitchDublu = parseFloat(document.getElementById('laborSwitchDublu').value) || 35;
+            let laborSwitchCapScara = parseFloat(document.getElementById('laborSwitchCapScara').value) || 45;
+            let laborLight = parseFloat(document.getElementById('laborLight').value) || 50;
+            let laborPIR = parseFloat(document.getElementById('laborPIR').value) || 60;
+            let laborCamera = parseFloat(document.getElementById('laborCamera').value) || 70;
+
+            let outletCounts = { simpla: 0, dubla: 0, tripla: 0 };
+            for (let outlet of outlets) outletCounts[outlet.type]++;
+            if (outletCounts.simpla > 0) {
+                rows.push(['Priză Simplă', outletCounts.simpla, 50, outletCounts.simpla * 50]);
+                rows.push(['Manoperă Priză Simplă', outletCounts.simpla, laborOutletSimpla, outletCounts.simpla * laborOutletSimpla]);
+            }
+            if (outletCounts.dubla > 0) {
+                rows.push(['Priză Dublă', outletCounts.dubla, 70, outletCounts.dubla * 70]);
+                rows.push(['Manoperă Priză Dublă', outletCounts.dubla, laborOutletDubla, outletCounts.dubla * laborOutletDubla]);
+            }
+            if (outletCounts.tripla > 0) {
+                rows.push(['Priză Triplă', outletCounts.tripla, 90, outletCounts.tripla * 90]);
+                rows.push(['Manoperă Priză Triplă', outletCounts.tripla, laborOutletTripla, outletCounts.tripla * laborOutletTripla]);
+            }
+
+            if (networkOutlets.length > 0) {
+                rows.push(['Priză de Rețea', networkOutlets.length, 60, networkOutlets.length * 60]);
+                rows.push(['Manoperă Priză de Rețea', networkOutlets.length, laborNetworkOutlet, networkOutlets.length * laborNetworkOutlet]);
+            }
+
+            let switchCounts = { simplu: 0, dublu: 0, capScara: 0 };
+            for (let sw of switches) switchCounts[sw.type]++;
+            if (switchCounts.simplu > 0) {
+                rows.push(['Întrerupător Simplu', switchCounts.simplu, 40, switchCounts.simplu * 40]);
+                rows.push(['Manoperă Întrerupător Simplu', switchCounts.simplu, laborSwitchSimplu, switchCounts.simplu * laborSwitchSimplu]);
+            }
+            if (switchCounts.dublu > 0) {
+                rows.push(['Întrerupător Dublu', switchCounts.dublu, 60, switchCounts.dublu * 60]);
+                rows.push(['Manoperă Întrerupător Dublu', switchCounts.dublu, laborSwitchDublu, switchCounts.dublu * laborSwitchDublu]);
+            }
+            if (switchCounts.capScara > 0) {
+                rows.push(['Întrerupător Cap Scara', switchCounts.capScara, 80, switchCounts.capScara * 80]);
+                rows.push(['Manoperă Întrerupător Cap Scara', switchCounts.capScara, laborSwitchCapScara, switchCounts.capScara * laborSwitchCapScara]);
+            }
+
+            if (lights.length > 0) {
+                rows.push(['Corp de Iluminat', lights.length, 100, lights.length * 100]);
+                rows.push(['Manoperă Corp de Iluminat', lights.length, laborLight, lights.length * laborLight]);
+            }
+
+            if (pirs.length > 0) {
+                rows.push(['Senzor PIR', pirs.length, 120, pirs.length * 120]);
+                rows.push(['Manoperă Senzor PIR', pirs.length, laborPIR, pirs.length * laborPIR]);
+            }
+
+            if (cameras.length > 0) {
+                rows.push(['Cameră Web', cameras.length, 150, cameras.length * 150]);
+                rows.push(['Manoperă Cameră Web', cameras.length, laborCamera, cameras.length * laborCamera]);
+            }
+
+            return rows;
+        }
+
+        function calculateTotal() {
+            let total = 0;
+            let laborOutletSimpla = parseFloat(document.getElementById('laborOutletSimpla').value) || 30;
+            let laborOutletDubla = parseFloat(document.getElementById('laborOutletDubla').value) || 40;
+            let laborOutletTripla = parseFloat(document.getElementById('laborOutletTripla').value) || 50;
+            let laborNetworkOutlet = parseFloat(document.getElementById('laborNetworkOutlet').value) || 35;
+            let laborSwitchSimplu = parseFloat(document.getElementById('laborSwitchSimplu').value) || 25;
+            let laborSwitchDublu = parseFloat(document.getElementById('laborSwitchDublu').value) || 35;
+            let laborSwitchCapScara = parseFloat(document.getElementById('laborSwitchCapScara').value) || 45;
+            let laborLight = parseFloat(document.getElementById('laborLight').value) || 50;
+            let laborPIR = parseFloat(document.getElementById('laborPIR').value) || 60;
+            let laborCamera = parseFloat(document.getElementById('laborCamera').value) || 70;
+
+            let outletCounts = { simpla: 0, dubla: 0, tripla: 0 };
+            for (let outlet of outlets) outletCounts[outlet.type]++;
+            total += outletCounts.simpla * (50 + laborOutletSimpla) + outletCounts.dubla * (70 + laborOutletDubla) + outletCounts.tripla * (90 + laborOutletTripla);
+
+            total += networkOutlets.length * (60 + laborNetworkOutlet);
+
+            let switchCounts = { simplu: 0, dublu: 0, capScara: 0 };
+            for (let sw of switches) switchCounts[sw.type]++;
+            total += switchCounts.simplu * (40 + laborSwitchSimplu) + switchCounts.dublu * (60 + laborSwitchDublu) + switchCounts.capScara * (80 + laborSwitchCapScara);
+
+            total += lights.length * (100 + laborLight);
+            total += pirs.length * (120 + laborPIR);
+            total += cameras.length * (150 + laborCamera);
+
+            return total;
+        }
+    </script>
+</body>
+</html>
