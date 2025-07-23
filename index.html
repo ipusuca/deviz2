@@ -384,7 +384,7 @@
         }
 
         function mousePressed() {
-            if (mouseX >= 0 && mouseX <= width && mouseY >= 0 && y <= height) {
+            if (mouseX >= 0 && mouseX <= width && mouseY >= 0 && mouseY <= height) {
                 console.log('Mouse pressed:', { x: mouseX, y: mouseY, mode });
                 if (['drawWall', 'drawDoor', 'drawWindow'].includes(mode)) {
                     if (!startPoint) {
@@ -459,6 +459,7 @@
             let switchHeight = 1; // 1m urcare pe perete
             let ceilingHeight = 1; // 1m de la întrerupător la tavan
             let cameraPirHeight = 3; // 3m urcare pentru cameră/PIR
+            const cableMargin = 1.3; // +30% pentru toate cablurile
 
             // Prize (3x2.5mm²)
             for (let outlet of outlets) {
@@ -500,7 +501,12 @@
                 cables.cat6 += panelHeight + distance + outletHeight;
             }
 
-            console.log('Cables calculated:', cables);
+            // Adaugă 30% marjă pentru toate cablurile
+            cables.power2_5 *= cableMargin;
+            cables.power1_5 *= cableMargin;
+            cables.cat6 *= cableMargin;
+
+            console.log('Cables calculated (with 30% margin):', cables);
             return cables;
         }
 
